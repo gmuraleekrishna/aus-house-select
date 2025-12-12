@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "house-selector"
+version = "0.1.0"
+description = "Streamlit explorer for SA1, school catchments, and transit datasets."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "folium>=0.16",
+    "geopandas>=0.14",
+    "geopy>=2.4",
+    "openpyxl>=3.1",
+    "pandas>=2.1",
+    "shapely>=2.0",
+    "streamlit>=1.30",
+    "streamlit-folium>=0.20",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "ruff>=0.3",
+    "pytest>=8.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

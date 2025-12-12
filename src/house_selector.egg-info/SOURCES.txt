@@ -1,0 +1,7 @@
+README.md
+pyproject.toml
+src/house_selector.egg-info/PKG-INFO
+src/house_selector.egg-info/SOURCES.txt
+src/house_selector.egg-info/dependency_links.txt
+src/house_selector.egg-info/requires.txt
+src/house_selector.egg-info/top_level.txt

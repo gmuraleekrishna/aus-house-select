@@ -1,0 +1,68 @@
+# House Selector
+
+Streamlit explorer for Australian ABS SA1 polygons, socio-economic metrics, school locations/rankings, catchments, and transit services. The app loads preprocessed GeoJSON files for fast filtering/visualization and lets you overlay school data, geocode addresses, and inspect SA1 attributes.
+
+## Features
+- Interactive Streamlit + Folium map with tooltips, filtering, and detail panels.
+- SA1 metadata enrichment using SEIFA XLS workbooks.
+- School stage classification plus Better Education ranking boilerplate.
+- Transit service overlay and public school catchment layers.
+- Optional ArcGIS FeatureServer downloads to GeoJSON.
+
+## Requirements
+- Python 3.11+ (see `.python-version`).
+- [uv](https://github.com/astral-sh/uv) for dependency management (or `pip` if preferred).
+- Local copies of the raw shapefiles/workbooks referenced under `data/`.
+
+## Setup
+```bash
+# install deps into a virtual env via uv
+uv sync
+
+# activate the virtual environment (optional – uv can auto-run commands)
+source .venv/bin/activate
+```
+
+## Preparing datasets
+Convert the raw shapefiles/workbooks once so the app can read smaller GeoJSON files:
+```bash
+python scripts/prep_geojson.py            # builds all datasets
+python scripts/prep_geojson.py --sa1      # only SA1 + SEIFA merge
+python scripts/prep_geojson.py --sa1 --state "Western Australia"
+python scripts/prep_geojson.py --catchments --schools
+```
+Outputs are written to `data/processed/`. Copy or symlink them into `assets/` if you want to keep the Streamlit app self-contained (default paths expect `assets/*.geojson`).
+
+### ArcGIS layers
+```bash
+python scripts/prep_geojson.py --arcgis-url "https://services.arcgis.com/.../FeatureServer/0"
+```
+Each layer saves to `data/processed/arcgis_layers/<name>.geojson`. You can reference those files through `data_utils.list_arcgis_layers`.
+
+### Excel conversion (optional)
+If you need CSV extracts of ABS Excel workbooks:
+```bash
+python scripts/prep_excel.py
+python scripts/prep_excel.py --input data/foo.xlsx --sheet "Table 1"
+```
+
+## Running the Streamlit app
+```bash
+uv run streamlit run main.py
+# or, if the virtual env is active:
+streamlit run main.py
+```
+The app assumes the processed GeoJSONs live under `assets/` as shown in `main.py` (`SA1_FILE`, `PTA_LINES_FILE`, etc.). Adjust those paths or mount assets accordingly.
+
+## Project layout
+- `main.py` – Streamlit UI + Folium map rendering.
+- `data_utils.py` – shared loading helpers, SEIFA merges, geocoding, ArcGIS fetches.
+- `scripts/prep_geojson.py` – preprocessing pipeline for shapefiles/ArcGIS layers.
+- `scripts/prep_excel.py` – XLS → CSV helper for SEIFA tables.
+- `assets/` – default location for processed GeoJSON inputs.
+- `data/` – raw source shapefiles/workbooks (not committed).
+
+## Development notes
+- Formatting/linting suggestions: run `uv run ruff check`.
+- Tests (if/when added): `uv run pytest`.
+- Keep large raw datasets outside version control; only processed GeoJSONs required at runtime.
