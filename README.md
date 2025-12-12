@@ -1,68 +1,45 @@
 # House Selector
 
-Streamlit explorer for Australian ABS SA1 polygons, socio-economic metrics, school locations/rankings, catchments, and transit services. The app loads preprocessed GeoJSON files for fast filtering/visualization and lets you overlay school data, geocode addresses, and inspect SA1 attributes.
+React + TypeScript explorer for Australian ABS SA1 polygons, socio-economic metrics, school locations/rankings, catchments, and transit services. The web UI loads the processed GeoJSON files from `assets/` and renders interactive overlays via Leaflet.
 
-## Features
-- Interactive Streamlit + Folium map with tooltips, filtering, and detail panels.
-- SA1 metadata enrichment using SEIFA XLS workbooks.
-- School stage classification plus Better Education ranking boilerplate.
-- Transit service overlay and public school catchment layers.
-- Optional ArcGIS FeatureServer downloads to GeoJSON.
+## Stack overview
+- Frontend: [Vite](https://vitejs.dev/) + React + TypeScript (`web/`).
+- Mapping: Leaflet + GeoJSON overlays (SA1, schools, transit, catchments, ArcGIS downloads).
+- Data prep: existing Python scripts under `scripts/` still generate GeoJSON files from shapefiles / Excel workbooks.
 
-## Requirements
-- Python 3.11+ (see `.python-version`).
-- [uv](https://github.com/astral-sh/uv) for dependency management (or `pip` if preferred).
-- Local copies of the raw shapefiles/workbooks referenced under `data/`.
+## Prerequisites
+- Node.js 18+ (for the frontend build/dev server).
+- Python 3.11+ (for the optional preprocessing helpers).
+- [uv](https://github.com/astral-sh/uv) or pip if you need to install the Python tooling.
 
-## Setup
+## Running the TypeScript app
 ```bash
-# install deps into a virtual env via uv
-uv sync
-
-# activate the virtual environment (optional – uv can auto-run commands)
-source .venv/bin/activate
+cd web
+npm install
+npm run dev         # start Vite dev server on http://localhost:5173
+npm run build       # optional: generate production build
 ```
-
-## Preparing datasets
-Convert the raw shapefiles/workbooks once so the app can read smaller GeoJSON files:
-```bash
-python scripts/prep_geojson.py            # builds all datasets
-python scripts/prep_geojson.py --sa1      # only SA1 + SEIFA merge
-python scripts/prep_geojson.py --sa1 --state "Western Australia"
-python scripts/prep_geojson.py --catchments --schools
-```
-Outputs are written to `data/processed/`. Copy or symlink them into `assets/` if you want to keep the Streamlit app self-contained (default paths expect `assets/*.geojson`).
+The Vite config exposes everything inside `assets/` as static files, so keep your processed GeoJSONs there (`sa1_2021.geojson`, `schools_2019.geojson`, `school_catchments.geojson`, `transit_services.geojson`, etc.).
 
 ### ArcGIS layers
+Place any preprocessed `.geojson` exports under `assets/arcgis_layers/` and regenerate the manifest so the UI can list them:
 ```bash
-python scripts/prep_geojson.py --arcgis-url "https://services.arcgis.com/.../FeatureServer/0"
+python scripts/build_arcgis_manifest.py
 ```
-Each layer saves to `data/processed/arcgis_layers/<name>.geojson`. You can reference those files through `data_utils.list_arcgis_layers`.
+This writes/updates `assets/arcgis_layers/index.json` that the frontend consumes. You can also fetch ad-hoc ArcGIS FeatureServer layers directly from the sidebar in the running app.
 
-### Excel conversion (optional)
-If you need CSV extracts of ABS Excel workbooks:
+## Preparing datasets (Python helpers)
+The original preprocessing scripts are unchanged and still live under `scripts/`. Run them from the repo root to populate `assets/`:
 ```bash
-python scripts/prep_excel.py
-python scripts/prep_excel.py --input data/foo.xlsx --sheet "Table 1"
+uv sync                     # install Python deps once
+uv run python scripts/prep_geojson.py            # builds all datasets
+uv run python scripts/prep_geojson.py --sa1      # only SA1 + SEIFA merge
+uv run python scripts/prep_geojson.py --catchments --schools
+uv run python scripts/prep_geojson.py --arcgis-url "https://services.arcgis.com/.../FeatureServer/0"
 ```
-
-## Running the Streamlit app
-```bash
-uv run streamlit run main.py
-# or, if the virtual env is active:
-streamlit run main.py
-```
-The app assumes the processed GeoJSONs live under `assets/` as shown in `main.py` (`SA1_FILE`, `PTA_LINES_FILE`, etc.). Adjust those paths or mount assets accordingly.
-
-## Project layout
-- `main.py` – Streamlit UI + Folium map rendering.
-- `data_utils.py` – shared loading helpers, SEIFA merges, geocoding, ArcGIS fetches.
-- `scripts/prep_geojson.py` – preprocessing pipeline for shapefiles/ArcGIS layers.
-- `scripts/prep_excel.py` – XLS → CSV helper for SEIFA tables.
-- `assets/` – default location for processed GeoJSON inputs.
-- `data/` – raw source shapefiles/workbooks (not committed).
+Outputs land in `data/processed/`; copy or symlink the GeoJSON files into `assets/` (or point the scripts there directly) so the React app can fetch them.
 
 ## Development notes
-- Formatting/linting suggestions: run `uv run ruff check`.
-- Tests (if/when added): `uv run pytest`.
-- Keep large raw datasets outside version control; only processed GeoJSONs required at runtime.
+- Local dev/build: `npm run dev`, `npm run build`, `npm run preview`.
+- Tests/linters are not yet wired up; add Vitest/ESLint if you need automation.
+- The legacy Streamlit code is no longer used for the UI but remains in `src/` for reference until the data prep scripts are ported.
