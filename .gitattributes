@@ -1,0 +1,5 @@
+assets/sa1_2021.geojson filter=lfs diff=lfs merge=lfs -text
+assets/school_catchments.geojson filter=lfs diff=lfs merge=lfs -text
+assets/schools_2019.geojson filter=lfs diff=lfs merge=lfs -text
+assets/statistical_area_level_1,_indexes,_seifa_2021_table_1.csv filter=lfs diff=lfs merge=lfs -text
+assets/transit_services.geojson filter=lfs diff=lfs merge=lfs -text
