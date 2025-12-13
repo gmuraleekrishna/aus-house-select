@@ -15,6 +15,7 @@ const SA1_FILE = "/sa1_2021.geojson";
 const SCHOOLS_FILE = "/schools_2019.geojson";
 const CATCHMENTS_FILE = "/school_catchments.geojson";
 const TRANSIT_FILE = "/transit_services.geojson";
+const STOPS_FILE = "/Stops_PTA_001_WA_GDA2020_Public.geojson";
 const ARCGIS_MANIFEST = "/arcgis_layers/index.json";
 
 async function fetchJson<T>(path: string): Promise<T | null> {
@@ -118,12 +119,13 @@ export async function fetchArcgisGeojson(url: string, where = "1=1", outFields =
 }
 
 export async function loadMapData(): Promise<MapData> {
-  const [sa1, transitSource, schools, catchmentsSource, arcgisManifest] = await Promise.all([
+  const [sa1, transitSource, schools, catchmentsSource, arcgisManifest, stops] = await Promise.all([
     fetchJson<GeoCollection>(SA1_FILE),
     fetchJson<GeoCollection>(TRANSIT_FILE),
     fetchJson<GeoCollection>(SCHOOLS_FILE),
     fetchJson<GeoCollection>(CATCHMENTS_FILE),
-    loadArcgisManifest()
+    loadArcgisManifest(),
+    fetchJson<GeoCollection>(STOPS_FILE)
   ]);
 
   if (!sa1) {
@@ -161,6 +163,7 @@ export async function loadMapData(): Promise<MapData> {
     schoolsWarning: stagedSchools ? undefined : "Schools GeoJSON missing from assets.",
     rankingWarning,
     seifaWarning: metadata.seifaColumns.length ? undefined : "SEIFA fields missing from SA1 GeoJSON.",
-    arcgisManifest
+    arcgisManifest,
+    stops
   };
 }

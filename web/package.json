@@ -9,13 +9,19 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tmcw/togeojson": "^5.8.0",
+    "esri-leaflet": "^3.0.11",
+    "jszip": "^3.10.1",
+    "leaflet": "^1.9.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "leaflet": "^1.9.4",
-    "react-leaflet": "^4.2.1"
+    "react-leaflet": "^4.2.1",
+    "@react-leaflet/core": "*"
   },
   "devDependencies": {
+    "@types/esri-leaflet": "^3.0.4",
     "@types/geojson": "^7946.0.14",
+    "@types/jszip": "^3.1.7",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",

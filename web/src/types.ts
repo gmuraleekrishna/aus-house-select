@@ -49,6 +49,7 @@ export interface MapData {
   transitWarning?: string;
   seifaWarning?: string;
   arcgisManifest: ArcgisManifest;
+  stops: GeoCollection | null;
 }
 
 export interface ArcgisManifestEntry {

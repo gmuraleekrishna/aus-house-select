@@ -180,3 +180,27 @@ button.full-width {
   font-size: 1.1rem;
   color: #475569;
 }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: #fff;
+  padding: 1.5rem;
+  border-radius: 0.75rem;
+  width: 90%;
+  max-width: 420px;
+  box-shadow: 0 15px 35px rgba(15, 23, 42, 0.25);
+}
+
+.modal h2 {
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+}

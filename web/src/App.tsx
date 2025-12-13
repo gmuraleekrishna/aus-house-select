@@ -19,6 +19,8 @@ import { ArcgisImageLayer } from "./components/ArcgisImageLayer";
 import { formatValue, parsePercentile } from "./utils/schools";
 import "leaflet/dist/leaflet.css";
 
+const NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search";
+
 const SCHOOL_DETAIL_FIELDS: Array<[string, string]> = [
   ["sector", "Sector"],
   ["stage", "Stage"],
@@ -76,6 +78,14 @@ interface ArcgisLayerState {
   data: GeoCollection;
 }
 
+interface CustomPlace {
+  id: number;
+  name: string;
+  address: string;
+  lat: number;
+  lon: number;
+}
+
 function buildLiaMapUrl(code: string | number | null | undefined) {
   if (!code) return null;
   const clean = String(code).trim();
@@ -88,6 +98,43 @@ function buildLiaPageUrl(code: string | number | null | undefined) {
   const clean = String(code).trim();
   if (!clean) return null;
   return `https://www.det.wa.edu.au/schoolsonline/localintakearea.do?schoolID=${clean}`;
+}
+
+async function geocodeQuery(query: string) {
+  const url = new URL(NOMINATIM_SEARCH_URL);
+  url.searchParams.set("format", "json");
+  url.searchParams.set("limit", "1");
+  url.searchParams.set("q", query.trim());
+  const response = await fetch(url.toString(), {
+    headers: {
+      Accept: "application/json"
+    }
+  });
+  if (!response.ok) {
+    throw new Error(response.statusText);
+  }
+  const payload = await response.json();
+  if (!Array.isArray(payload) || !payload.length) {
+    return null;
+  }
+  const match = payload[0];
+  return {
+    lat: Number(match.lat),
+    lon: Number(match.lon),
+    address: match.display_name
+  };
+}
+
+function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371; // km
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }
 
 function App() {
@@ -112,6 +159,12 @@ function App() {
   const [kmzError, setKmzError] = useState<string | null>(null);
   const [kmzLoading, setKmzLoading] = useState(false);
   const mapRef = useRef<L.Map | null>(null);
+  const [customPlaces, setCustomPlaces] = useState<CustomPlace[]>([]);
+  const [showPlacesModal, setShowPlacesModal] = useState(false);
+  const [placeName, setPlaceName] = useState("");
+  const [placeAddress, setPlaceAddress] = useState("");
+  const [placeStatus, setPlaceStatus] = useState<string | null>(null);
+  const [placeLoading, setPlaceLoading] = useState(false);
   const [imageLayers, setImageLayers] = useState<
     Array<{ name: string; url: string; opacity: number; format: string }>
   >([]);
@@ -196,6 +249,69 @@ function App() {
     return { type: "FeatureCollection", features: [selectedSa1] } as GeoCollection;
   }, [selectedSa1]);
 
+  const nearestSchools = useMemo(() => {
+    if (!addressPin || !data?.schools?.features?.length) return [];
+    const { lat, lon } = addressPin;
+    const entries = data.schools.features
+      .map((feature) => {
+        const coords = feature.geometry?.type === "Point" ? feature.geometry.coordinates : null;
+        if (!coords || coords.length < 2) return null;
+        const [featLon, featLat] = coords;
+        if (
+          typeof featLat !== "number" ||
+          typeof featLon !== "number" ||
+          Number.isNaN(featLat) ||
+          Number.isNaN(featLon)
+        ) {
+          return null;
+        }
+        const distance = haversineDistance(lat, lon, featLat, featLon);
+        return { feature, distance };
+      })
+      .filter((item): item is { feature: GeoFeature; distance: number } => Boolean(item))
+      .filter((item) => item.distance <= 4)
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, 5);
+    return entries;
+  }, [addressPin, data?.schools?.features]);
+
+  const nearestStops = useMemo(() => {
+    if (!addressPin || !data?.stops?.features?.length) return [];
+    const { lat, lon } = addressPin;
+    const entries = data.stops.features
+      .map((feature) => {
+        const coords =
+          feature.geometry?.type === "Point" ? (feature.geometry.coordinates as [number, number]) : null;
+        if (!coords || coords.length < 2) return null;
+        const [featLon, featLat] = coords;
+        if (
+          typeof featLat !== "number" ||
+          typeof featLon !== "number" ||
+          Number.isNaN(featLat) ||
+          Number.isNaN(featLon)
+        ) {
+          return null;
+        }
+        const distance = haversineDistance(lat, lon, featLat, featLon);
+        return { feature, distance };
+      })
+      .filter((item): item is { feature: GeoFeature; distance: number } => Boolean(item))
+      .filter((item) => item.distance <= 4)
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, 5);
+    return entries;
+  }, [addressPin, data?.stops?.features]);
+
+  const importantPlaceDistances = useMemo(() => {
+    if (!addressPin || !customPlaces.length) return [];
+    return customPlaces
+      .map((place) => ({
+        ...place,
+        distance: haversineDistance(addressPin.lat, addressPin.lon, place.lat, place.lon)
+      }))
+      .sort((a, b) => a.distance - b.distance);
+  }, [addressPin, customPlaces]);
+
   const handleGeocode = async (event?: FormEvent) => {
     event?.preventDefault();
     if (!addressQuery.trim()) {
@@ -204,35 +320,18 @@ function App() {
     }
     setGeocodeStatus("Searching...");
     try {
-      const url = new URL("https://nominatim.openstreetmap.org/search");
-      url.searchParams.set("format", "json");
-      url.searchParams.set("limit", "1");
-      url.searchParams.set("q", addressQuery.trim());
-      const response = await fetch(url.toString(), {
-        headers: {
-          Accept: "application/json"
-        }
-      });
-      if (!response.ok) {
-        throw new Error(response.statusText);
-      }
-      const payload = await response.json();
-      if (Array.isArray(payload) && payload.length) {
-        const match = payload[0];
-        setAddressPin({
-          lat: parseFloat(match.lat),
-          lon: parseFloat(match.lon),
-          address: match.display_name
-        });
-        const lat = parseFloat(match.lat);
-        const lon = parseFloat(match.lon);
-        if (!Number.isNaN(lat) && !Number.isNaN(lon)) {
-          mapRef.current?.flyTo([lat, lon], 16, { duration: 1.2 });
-        }
-        setGeocodeStatus("Address located on the map.");
-      } else {
+      const result = await geocodeQuery(addressQuery);
+      if (!result) {
         setGeocodeStatus("Address not found.");
+        return;
       }
+      setAddressPin(result);
+      if (!Number.isNaN(result.lat) && !Number.isNaN(result.lon) && mapRef.current) {
+        setTimeout(() => {
+          mapRef.current?.flyTo([result.lat, result.lon], 16, { duration: 1.2 });
+        }, 50);
+      }
+      setGeocodeStatus("Address located on the map.");
     } catch (err) {
       setGeocodeStatus(`Geocoding failed: ${(err as Error).message}`);
     }
@@ -289,6 +388,44 @@ function App() {
       setKmzLoading(false);
       event.target.value = "";
     }
+  };
+
+  const handleAddPlace = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!placeAddress.trim()) {
+      setPlaceStatus("Provide an address.");
+      return;
+    }
+    setPlaceLoading(true);
+    setPlaceStatus("Geocoding place...");
+    try {
+      const result = await geocodeQuery(placeAddress);
+      if (!result) {
+        setPlaceStatus("Address not found.");
+        return;
+      }
+      setCustomPlaces((prev) => [
+        ...prev,
+        {
+          id: Date.now(),
+          name: placeName.trim() || result.address,
+          address: result.address,
+          lat: result.lat,
+          lon: result.lon
+        }
+      ]);
+      setPlaceName("");
+      setPlaceAddress("");
+      setPlaceStatus("Place added.");
+    } catch (error) {
+      setPlaceStatus(`Failed to add place: ${(error as Error).message}`);
+    } finally {
+      setPlaceLoading(false);
+    }
+  };
+
+  const handleRemovePlace = (id: number) => {
+    setCustomPlaces((prev) => prev.filter((place) => place.id !== id));
   };
 
   const missingProcessed = useMemo(
@@ -389,6 +526,53 @@ function App() {
 
   return (
     <div className="app-shell">
+      {showPlacesModal && (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <h2>Add important place</h2>
+            <form onSubmit={handleAddPlace}>
+              <label htmlFor="place-name">Label</label>
+              <input
+                id="place-name"
+                type="text"
+                value={placeName}
+                onChange={(event) => setPlaceName(event.target.value)}
+                placeholder="Optional label (e.g. Work)"
+                style={{ marginBottom: "0.5rem" }}
+              />
+              <label htmlFor="place-address">Address *</label>
+              <input
+                id="place-address"
+                type="text"
+                value={placeAddress}
+                onChange={(event) => setPlaceAddress(event.target.value)}
+                placeholder="123 Example St, Suburb"
+                style={{ marginBottom: "0.5rem" }}
+              />
+              {placeStatus && (
+                <div className="alert info" style={{ marginBottom: "0.5rem" }}>
+                  {placeStatus}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+                <button type="submit" className="primary" disabled={placeLoading}>
+                  {placeLoading ? "Adding..." : "Add place"}
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    setShowPlacesModal(false);
+                    setPlaceStatus(null);
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
       <aside className="sidebar">
         <h1>Suburb Explorer</h1>
         <div className="form-group">
@@ -432,6 +616,29 @@ function App() {
           </div>
           {geocodeStatus && <div className="alert info">{geocodeStatus}</div>}
         </form>
+
+        <div className="form-group">
+          <label>Important places</label>
+          <button type="button" className="primary full-width" onClick={() => setShowPlacesModal(true)}>
+            Add place
+          </button>
+          {customPlaces.length > 0 ? (
+            <ul className="detail-list" style={{ marginTop: "0.5rem" }}>
+              {customPlaces.map((place) => (
+                <li key={place.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>{place.name}</span>
+                  <button type="button" className="secondary" onClick={() => handleRemovePlace(place.id)}>
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="alert info" style={{ marginTop: "0.5rem" }}>
+              No saved places yet.
+            </div>
+          )}
+        </div>
 
         {schoolPercentileDefault != null && (
           <div className="form-group">
@@ -767,6 +974,58 @@ function App() {
             </div>
           ) : (
             <div className="alert info">Click a school marker or SA1 polygon to see more details.</div>
+          )}
+          {addressPin && importantPlaceDistances.length > 0 && (
+            <div style={{ marginTop: "1rem" }}>
+              <h3 style={{ marginBottom: "0.5rem" }}>Important places</h3>
+              <ul className="detail-list">
+                {importantPlaceDistances.map((place) => (
+                  <li key={place.id}>
+                    <strong>{place.name}</strong> – {place.distance.toFixed(2)} km
+                    <div style={{ fontSize: "0.85rem", color: "#475569" }}>{place.address}</div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {addressPin && nearestSchools.length > 0 && (
+            <div style={{ marginTop: "1rem" }}>
+              <h3 style={{ marginBottom: "0.5rem" }}>Nearby schools</h3>
+              <ul className="detail-list">
+                {nearestSchools.map(({ feature, distance }) => {
+                  const code = feature.properties?.schoolcode;
+                  const liaUrl = buildLiaMapUrl(code);
+                  return (
+                    <li key={feature.properties?.schoolcode || feature.properties?.schoolname}>
+                      <strong>{feature.properties?.schoolname || "School"}</strong> – {distance.toFixed(2)} km
+                      {liaUrl && (
+                        <a
+                          href={liaUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="secondary"
+                          style={{ marginLeft: "0.5rem", padding: "0.2rem 0.6rem", fontSize: "0.8rem" }}
+                        >
+                          LIA PDF
+                        </a>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+          {addressPin && nearestStops.length > 0 && (
+            <div style={{ marginTop: "1rem" }}>
+              <h3 style={{ marginBottom: "0.5rem" }}>Nearby transit stops</h3>
+              <ul className="detail-list">
+                {nearestStops.map(({ feature, distance }) => (
+                  <li key={feature.properties?.stopid || feature.properties?.stopname}>
+                    <strong>{feature.properties?.stopname || "Stop"}</strong> – {distance.toFixed(2)} km
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
       </section>
