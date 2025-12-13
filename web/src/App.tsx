@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -14,6 +14,8 @@ import type { GeoCollection, GeoFeature } from "./types";
 import { useMapData } from "./hooks/useMapData";
 import { buildTooltipFields, getMapCenter, makeSa1Style } from "./utils/geojson";
 import { fetchArcgisGeojson } from "./utils/loaders";
+import { loadKmzLayer } from "./utils/kmz";
+import { ArcgisImageLayer } from "./components/ArcgisImageLayer";
 import { formatValue, parsePercentile } from "./utils/schools";
 import "leaflet/dist/leaflet.css";
 
@@ -81,6 +83,13 @@ function buildLiaMapUrl(code: string | number | null | undefined) {
   return `https://www.det.wa.edu.au/schoolsonline/school_file_download?schoolID=${clean}&fileType=INTAKE_MAP01&yearID=_NA`;
 }
 
+function buildLiaPageUrl(code: string | number | null | undefined) {
+  if (!code) return null;
+  const clean = String(code).trim();
+  if (!clean) return null;
+  return `https://www.det.wa.edu.au/schoolsonline/localintakearea.do?schoolID=${clean}`;
+}
+
 function App() {
   const { data, loading, error } = useMapData();
   const [selectedState, setSelectedState] = useState<string | null>(null);
@@ -99,6 +108,18 @@ function App() {
   const [selectedProcessedLayers, setSelectedProcessedLayers] = useState<string[]>([]);
   const [processedLayerData, setProcessedLayerData] = useState<Record<string, GeoCollection>>({});
   const [processedLayerError, setProcessedLayerError] = useState<string | null>(null);
+  const [kmzLayers, setKmzLayers] = useState<ArcgisLayerState[]>([]);
+  const [kmzError, setKmzError] = useState<string | null>(null);
+  const [kmzLoading, setKmzLoading] = useState(false);
+  const mapRef = useRef<L.Map | null>(null);
+  const [imageLayers, setImageLayers] = useState<
+    Array<{ name: string; url: string; opacity: number; format: string }>
+  >([]);
+  const [imageLayerName, setImageLayerName] = useState("");
+  const [imageLayerUrl, setImageLayerUrl] = useState("");
+  const [imageLayerOpacity, setImageLayerOpacity] = useState(70);
+  const [imageLayerFormat, setImageLayerFormat] = useState("png32");
+  const [imageLayerError, setImageLayerError] = useState<string | null>(null);
 
   useEffect(() => {
     if (data && !selectedState && data.metadata.states.length) {
@@ -203,6 +224,11 @@ function App() {
           lon: parseFloat(match.lon),
           address: match.display_name
         });
+        const lat = parseFloat(match.lat);
+        const lon = parseFloat(match.lon);
+        if (!Number.isNaN(lat) && !Number.isNaN(lon)) {
+          mapRef.current?.flyTo([lat, lon], 16, { duration: 1.2 });
+        }
         setGeocodeStatus("Address located on the map.");
       } else {
         setGeocodeStatus("Address not found.");
@@ -230,6 +256,38 @@ function App() {
       setArcgisError((err as Error).message);
     } finally {
       setAddingArcgis(false);
+    }
+  };
+
+  const handleAddImageLayer = () => {
+    if (!imageLayerUrl.trim()) {
+      setImageLayerError("Provide an ArcGIS ImageServer URL.");
+      return;
+    }
+    setImageLayerError(null);
+    const name = imageLayerName.trim() || "ImageServer layer";
+    const opacity = Math.min(1, Math.max(0, imageLayerOpacity / 100));
+    const format = imageLayerFormat.trim() || "png32";
+    setImageLayers((prev) => [...prev, { name, url: imageLayerUrl.trim(), opacity, format }]);
+    setImageLayerName("");
+    setImageLayerUrl("");
+    setImageLayerOpacity(70);
+  };
+
+  const handleKmzUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setKmzLoading(true);
+    setKmzError(null);
+    try {
+      const geojson = await loadKmzLayer(file);
+      const baseName = file.name.replace(/\\.(kmz|kml)$/i, "");
+      setKmzLayers((prev) => [...prev, { name: baseName || file.name, data: geojson }]);
+    } catch (err) {
+      setKmzError((err as Error).message);
+    } finally {
+      setKmzLoading(false);
+      event.target.value = "";
     }
   };
 
@@ -473,6 +531,90 @@ function App() {
             ))}
           </div>
         )}
+
+        <div className="section-title">ImageServer layers</div>
+        <div className="form-group">
+          <input
+            type="text"
+            placeholder="Layer display name"
+            value={imageLayerName}
+            onChange={(event) => setImageLayerName(event.target.value)}
+            style={{ marginBottom: "0.5rem" }}
+          />
+          <textarea
+            value={imageLayerUrl}
+            onChange={(event) => setImageLayerUrl(event.target.value)}
+            placeholder="https://services.arcgis.com/.../ImageServer"
+            rows={3}
+            style={{ marginBottom: "0.5rem" }}
+          />
+          <label htmlFor="image-opacity">Opacity ({imageLayerOpacity}%)</label>
+          <input
+            id="image-opacity"
+            type="range"
+            min={10}
+            max={100}
+            value={imageLayerOpacity}
+            onChange={(event) => setImageLayerOpacity(Number(event.target.value))}
+            className="slider-input"
+          />
+          <label htmlFor="image-format" style={{ marginTop: "0.5rem" }}>
+            Format
+          </label>
+          <select
+            id="image-format"
+            value={imageLayerFormat}
+            onChange={(event) => setImageLayerFormat(event.target.value)}
+            style={{ marginBottom: "0.5rem" }}
+          >
+            <option value="png32">PNG32 (default)</option>
+            <option value="png">PNG</option>
+            <option value="jpg">JPG</option>
+          </select>
+          <button type="button" className="primary full-width" onClick={handleAddImageLayer}>
+            Add ImageServer layer
+          </button>
+          {imageLayerError && <div className="alert warning">{imageLayerError}</div>}
+        </div>
+        {imageLayers.length > 0 && (
+          <div>
+            {imageLayers.map((layer, index) => (
+              <div key={`image-${index}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.25rem" }}>
+                <span>{layer.name}</span>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setImageLayers((prev) => prev.filter((_, idx) => idx !== index))}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="section-title">KMZ / KML layers</div>
+        <div className="form-group">
+          <input type="file" accept=".kmz,.kml" onChange={handleKmzUpload} />
+          {kmzLoading && <div className="alert info">Processing file…</div>}
+          {kmzError && <div className="alert warning">{kmzError}</div>}
+        </div>
+        {kmzLayers.length > 0 && (
+          <div>
+            {kmzLayers.map((layer, index) => (
+              <div key={`kmz-${index}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.25rem" }}>
+                <span>{layer.name}</span>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setKmzLayers((prev) => prev.filter((_, idx) => idx !== index))}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </aside>
 
       <section className="map-panel">
@@ -482,6 +624,9 @@ function App() {
             zoom={selectedState ? 10 : 4}
             style={{ height: "100%", width: "100%" }}
             scrollWheelZoom
+            whenCreated={(mapInstance) => {
+              mapRef.current = mapInstance;
+            }}
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
             <LayersControl position="topright">
@@ -545,6 +690,16 @@ function App() {
                   </LayersControl.Overlay>
                 );
               })}
+              {imageLayers.map((layer, index) => (
+                <LayersControl.Overlay key={`image-${index}`} name={`ImageServer - ${layer.name}`} checked>
+                  <ArcgisImageLayer url={layer.url} opacity={layer.opacity} format={layer.format as any} />
+                </LayersControl.Overlay>
+              ))}
+              {kmzLayers.map((layer, index) => (
+                <LayersControl.Overlay key={`kmz-${index}`} name={`KMZ - ${layer.name}`}>
+                  <GeoJSON data={layer.data as FeatureCollection} style={() => ({ color: "#0f4c5c", weight: 2, fillOpacity: 0.2 })} />
+                </LayersControl.Overlay>
+              ))}
             </LayersControl>
             {addressPin && (
               <CircleMarker
@@ -572,16 +727,28 @@ function App() {
                   );
                 })}
               </ul>
-              {buildLiaMapUrl(selectedSchool.properties?.schoolcode) && (
-                <a
-                  className="primary"
-                  href={buildLiaMapUrl(selectedSchool.properties?.schoolcode) || "#"}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Download intake map
-                </a>
-              )}
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                {buildLiaMapUrl(selectedSchool.properties?.schoolcode) && (
+                  <a
+                    className="primary"
+                    href={buildLiaMapUrl(selectedSchool.properties?.schoolcode) || "#"}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Download intake map
+                  </a>
+                )}
+                {buildLiaPageUrl(selectedSchool.properties?.schoolcode) && (
+                  <a
+                    className="secondary"
+                    href={buildLiaPageUrl(selectedSchool.properties?.schoolcode) || "#"}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    View LIA page
+                  </a>
+                )}
+              </div>
             </div>
           ) : selectedSa1 ? (
             <div>

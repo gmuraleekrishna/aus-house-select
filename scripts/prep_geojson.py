@@ -16,10 +16,12 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import urlopen
+from zipfile import ZipFile
 
 import geopandas as gpd
 import pandas as pd
@@ -502,6 +504,47 @@ def convert_arcgis_layers(definitions: list[str | dict], out_dir: Path = ARCGIS_
         print(f"  Saved to {out_path}")
 
 
+def _load_kmz_to_gdf(path: Path):
+    suffix = path.suffix.lower()
+    if suffix == ".kml":
+        return gpd.read_file(path)
+    if suffix != ".kmz":
+        raise ValueError(f"Unsupported file type: {path}")
+    with ZipFile(path, "r") as archive:
+        kml_names = [name for name in archive.namelist() if name.lower().endswith(".kml")]
+        if not kml_names:
+            raise ValueError("KMZ archive does not contain a KML file.")
+        target_name = kml_names[0]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir) / Path(target_name).name
+            tmp_path.write_bytes(archive.read(target_name))
+            return gpd.read_file(tmp_path)
+
+
+def convert_kmz_layers(files: list[str], out_dir: Path = ARCGIS_OUT):
+    if not files:
+        print("No KMZ/KML files provided; skipping.")
+        return
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for idx, file_path in enumerate(files, start=1):
+        path = Path(file_path).expanduser()
+        if not path.exists():
+            print(f"Skipping KMZ layer #{idx}: {path} not found.")
+            continue
+        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", path.stem) or f"kmz_layer_{idx}"
+        print(f"Converting KMZ/KML layer #{idx} ({safe_name}) from {path} ...")
+        try:
+            gdf = _load_kmz_to_gdf(path)
+            gdf = gdf.to_crs(epsg=4326)
+        except Exception as exc:
+            print(f"  Failed: {exc}")
+            continue
+        out_path = out_dir / f"{safe_name}.geojson"
+        gdf.to_file(out_path, driver="GeoJSON")
+        print(f"  Saved to {out_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Convert shapefiles into GeoJSON for faster runtime loading."
@@ -541,10 +584,22 @@ def main():
         action="append",
         help="ArcGIS FeatureServer base URL to export as GeoJSON (can specify multiple).",
     )
+    parser.add_argument(
+        "--kmz-file",
+        action="append",
+        help="Path to a KMZ or KML file to convert into GeoJSON (saved under processed/arcgis_layers).",
+    )
     args = parser.parse_args()
 
     if not any(
-        [args.sa1, args.transit, args.schools, args.catchments, args.arcgis_url]
+        [
+            args.sa1,
+            args.transit,
+            args.schools,
+            args.catchments,
+            args.arcgis_url,
+            args.kmz_file,
+        ]
     ):
         args.sa1 = args.transit = args.schools = args.catchments = True
 
@@ -558,6 +613,8 @@ def main():
         convert_catchments()
     if args.arcgis_url:
         convert_arcgis_layers(args.arcgis_url)
+    if args.kmz_file:
+        convert_kmz_layers(args.kmz_file)
 
 
 if __name__ == "__main__":

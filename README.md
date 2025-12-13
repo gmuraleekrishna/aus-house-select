@@ -28,6 +28,17 @@ python scripts/build_arcgis_manifest.py
 ```
 This writes/updates `assets/arcgis_layers/index.json` that the frontend consumes. You can also fetch ad-hoc ArcGIS FeatureServer layers directly from the sidebar in the running app.
 
+### KMZ / KML overlays
+Use the “KMZ / KML layers” uploader in the sidebar to add ad-hoc geospatial overlays. The browser unzips KMZ files on the fly and converts them to GeoJSON so they appear as toggleable Leaflet layers without needing any preprocessing.
+If you prefer offline conversion (e.g., to ship the processed files with the app), use the prep script:
+```bash
+python scripts/prep_geojson.py --kmz-file data/custom_layer.kmz
+```
+Converted files are written to `data/processed/arcgis_layers/`; copy them into `assets/arcgis_layers/` and rebuild the manifest.
+
+### ArcGIS ImageServer overlays
+Paste any ImageServer endpoint into the “ImageServer layers” form in the sidebar to render it as a dynamic raster overlay. You can control the label and opacity (PNG/JPG formats supported) and toggle the resulting layers inside the Leaflet control like the other data sources.
+
 ## Preparing datasets (Python helpers)
 The original preprocessing scripts are unchanged and still live under `scripts/`. Run them from the repo root to populate `assets/`:
 ```bash
